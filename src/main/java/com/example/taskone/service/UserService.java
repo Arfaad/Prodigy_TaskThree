@@ -6,6 +6,10 @@ import com.example.taskone.model.Role;
 import com.example.taskone.model.User;
 import com.example.taskone.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +21,7 @@ import java.util.regex.Pattern;
 /**
  * Service class handling core business logic for user management operations (CRUD).
  * Integrates password hashing, role assignment, and validation checks.
+ * Optimized with declarative Spring Caching to minimize redundant SQL queries.
  */
 @Service
 public class UserService {
@@ -42,18 +47,19 @@ public class UserService {
     }
 
     /**
-     * Fetches all registered users from the database.
+     * Fetches all registered users from the database. Cached under "usersList".
      * Transaction is read-only for performance optimization.
      * 
      * @return List of Users in the database.
      */
+    @Cacheable(value = "usersList")
     @Transactional(readOnly = true)
     public List<User> getAllUsers() {
         return userRepository.findAll();
     }
 
     /**
-     * Fetches a specific user by their unique identifier (UUID).
+     * Fetches a specific user by their unique identifier (UUID). Cached under "users".
      * Throws an exception if the user does not exist.
      * Transaction is read-only for performance optimization.
      * 
@@ -61,6 +67,7 @@ public class UserService {
      * @return The User if found.
      * @throws UserNotFoundException if no user matches the given UUID.
      */
+    @Cacheable(value = "users", key = "#id")
     @Transactional(readOnly = true)
     public User getUserById(UUID id) {
         return userRepository.findById(id)
@@ -69,12 +76,17 @@ public class UserService {
 
     /**
      * Validates and saves a new user in the database.
-     * Generates a new random UUID, encodes the raw password, defaults the role if null, and verifies email uniqueness.
+     * Puts the newly created user in the "users" cache and evicts the "usersList" and "usersByEmail" caches.
      * 
      * @param user The User information containing name, email, age, and password.
      * @return The saved User entity.
      * @throws ValidationException if validations fail or the email is already registered.
      */
+    @CachePut(value = "users", key = "#result.id")
+    @Caching(evict = {
+        @CacheEvict(value = "usersList", allEntries = true),
+        @CacheEvict(value = "usersByEmail", allEntries = true)
+    })
     @Transactional
     public User createUser(User user) {
         validateUser(user);
@@ -101,7 +113,7 @@ public class UserService {
 
     /**
      * Updates an existing user's details.
-     * Validates that the user exists, encodes the password if changed/provided, and checks email uniqueness.
+     * Updates the "users" cache with the new user details and evicts the "usersList" and "usersByEmail" caches.
      * 
      * @param id The UUID of the user to update.
      * @param userDetails The new User details.
@@ -109,6 +121,11 @@ public class UserService {
      * @throws UserNotFoundException if the user does not exist.
      * @throws ValidationException if input details are invalid or the email is taken by another user.
      */
+    @CachePut(value = "users", key = "#id")
+    @Caching(evict = {
+        @CacheEvict(value = "usersList", allEntries = true),
+        @CacheEvict(value = "usersByEmail", allEntries = true)
+    })
     @Transactional
     public User updateUser(UUID id, User userDetails) {
         User existingUser = userRepository.findById(id)
@@ -142,10 +159,16 @@ public class UserService {
 
     /**
      * Deletes a user by their UUID.
+     * Evicts the deleted user from "users" and "usersByEmail" caches, and invalidates "usersList" cache.
      * 
      * @param id The UUID of the user to delete.
      * @throws UserNotFoundException if the user does not exist.
      */
+    @Caching(evict = {
+        @CacheEvict(value = "users", key = "#id"),
+        @CacheEvict(value = "usersList", allEntries = true),
+        @CacheEvict(value = "usersByEmail", allEntries = true)
+    })
     @Transactional
     public void deleteUser(UUID id) {
         if (!userRepository.existsById(id)) {
