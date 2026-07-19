@@ -1,5 +1,6 @@
 package com.example.taskone;
 
+import com.example.taskone.model.Role;
 import com.example.taskone.model.User;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -8,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -20,6 +22,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
+@WithMockUser(username = "john.doe@example.com", roles = {"USER"})
 public class UserControllerTest {
 
     @Autowired
@@ -28,14 +31,24 @@ public class UserControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private org.springframework.web.context.WebApplicationContext context;
+
     private User validUser;
 
     @BeforeEach
     void setUp() {
+        mockMvc = org.springframework.test.web.servlet.setup.MockMvcBuilders
+                .webAppContextSetup(context)
+                .apply(org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity())
+                .build();
+
         validUser = User.builder()
                 .name("John Doe")
                 .email("john.doe@example.com")
                 .age(30)
+                .password("password123")
+                .role(Role.USER)
                 .build();
     }
 
@@ -57,6 +70,8 @@ public class UserControllerTest {
                 .name("John Doe")
                 .email("invalid-email")
                 .age(30)
+                .password("password123")
+                .role(Role.USER)
                 .build();
 
         mockMvc.perform(post("/api/users")
@@ -74,6 +89,8 @@ public class UserControllerTest {
                 .name("   ")
                 .email("john.doe@example.com")
                 .age(30)
+                .password("password123")
+                .role(Role.USER)
                 .build();
 
         mockMvc.perform(post("/api/users")
@@ -89,6 +106,8 @@ public class UserControllerTest {
                 .name("John Doe")
                 .email("john.doe@example.com")
                 .age(-5)
+                .password("password123")
+                .role(Role.USER)
                 .build();
 
         mockMvc.perform(post("/api/users")
@@ -157,6 +176,8 @@ public class UserControllerTest {
                 .name("John Updated")
                 .email("john.updated@example.com")
                 .age(35)
+                .password("newpassword123")
+                .role(Role.USER)
                 .build();
 
         mockMvc.perform(put("/api/users/" + userId)

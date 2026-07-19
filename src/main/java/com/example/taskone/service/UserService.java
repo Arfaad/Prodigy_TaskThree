@@ -2,9 +2,11 @@ package com.example.taskone.service;
 
 import com.example.taskone.exception.UserNotFoundException;
 import com.example.taskone.exception.ValidationException;
+import com.example.taskone.model.Role;
 import com.example.taskone.model.User;
 import com.example.taskone.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,10 +14,15 @@ import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
+/**
+ * Service class handling core business logic for user management operations (CRUD).
+ * Integrates password hashing, role assignment, and validation checks.
+ */
 @Service
 public class UserService {
 
     private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
     
     // Simple email validation regex pattern
     private static final Pattern EMAIL_PATTERN = Pattern.compile(
@@ -23,13 +30,15 @@ public class UserService {
     );
 
     /**
-     * Constructor injection of the UserRepository.
+     * Constructor injection of dependencies.
      * 
      * @param userRepository The database repository handler.
+     * @param passwordEncoder The BCrypt password hashing handler.
      */
     @Autowired
-    public UserService(UserRepository userRepository) {
+    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     /**
@@ -60,9 +69,9 @@ public class UserService {
 
     /**
      * Validates and saves a new user in the database.
-     * Generates a new random UUID for the user and verifies email uniqueness.
+     * Generates a new random UUID, encodes the raw password, defaults the role if null, and verifies email uniqueness.
      * 
-     * @param user The User information containing name, email, and age.
+     * @param user The User information containing name, email, age, and password.
      * @return The saved User entity.
      * @throws ValidationException if validations fail or the email is already registered.
      */
@@ -73,15 +82,26 @@ public class UserService {
         if (userRepository.existsByEmail(user.getEmail())) {
             throw new ValidationException("Email is already in use");
         }
+
+        // Validate password specifically for new users
+        if (user.getPassword() == null || user.getPassword().trim().length() < 6) {
+            throw new ValidationException("Password is required and must be at least 6 characters");
+        }
         
         UUID id = UUID.randomUUID();
         user.setId(id);
+        // Encode password securely
+        user.setPassword(passwordEncoder.encode(user.getPassword()));
+        // Assign default role if none provided
+        if (user.getRole() == null) {
+            user.setRole(Role.USER);
+        }
         return userRepository.save(user);
     }
 
     /**
      * Updates an existing user's details.
-     * Validates that the user exists, verifies details, and ensures email uniqueness.
+     * Validates that the user exists, encodes the password if changed/provided, and checks email uniqueness.
      * 
      * @param id The UUID of the user to update.
      * @param userDetails The new User details.
@@ -91,9 +111,8 @@ public class UserService {
      */
     @Transactional
     public User updateUser(UUID id, User userDetails) {
-        if (!userRepository.existsById(id)) {
-            throw new UserNotFoundException("User with ID " + id + " not found");
-        }
+        User existingUser = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException("User with ID " + id + " not found"));
         
         validateUser(userDetails);
         
@@ -102,6 +121,22 @@ public class UserService {
         }
         
         userDetails.setId(id); // Ensure the ID remains unchanged
+        
+        // Handle password update: if a new password is provided, encode it; otherwise keep the existing password
+        if (userDetails.getPassword() != null && !userDetails.getPassword().trim().isEmpty()) {
+            if (userDetails.getPassword().trim().length() < 6) {
+                throw new ValidationException("Password must be at least 6 characters");
+            }
+            userDetails.setPassword(passwordEncoder.encode(userDetails.getPassword()));
+        } else {
+            userDetails.setPassword(existingUser.getPassword());
+        }
+
+        // Keep the role of the user if not specified in update
+        if (userDetails.getRole() == null) {
+            userDetails.setRole(existingUser.getRole());
+        }
+
         return userRepository.save(userDetails);
     }
 
